@@ -7,7 +7,6 @@ import sys
 import glob
 from pathlib import Path
 import os
-from tqdm import tqdm
 from log import l, logger_setup
 
 l = logging.getLogger()
@@ -123,7 +122,8 @@ def main():
         l.debug(f"Found {num_files} files")
 
         i = 0
-        for i in tqdm(range(num_files)):
+        toolbar_width = 40
+        for i in range(num_files):
             f = Path(file_list[i])
             if f.is_file():
                 parent = str(f.parents[0]).split('\\')[-1]
@@ -140,9 +140,11 @@ def main():
                         os.makedirs(outfile.parents[0])
                     iis_log = IISLog(f, outfile)
                     iis_log.parse()
+            
             i += 1
-
-                
+            sys.stdout.write(f"[#]  Progress: {i}/{num_files}")
+            sys.stdout.flush()
+            sys.stdout.write("\b" * (toolbar_width+1))                
 
     except Exception as e:
         l.error(f'ERROR: {e}\n{traceback.format_exc()}')
