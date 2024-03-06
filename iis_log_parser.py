@@ -7,7 +7,7 @@ import sys
 import glob
 from pathlib import Path
 import os
-from alive_progress import alive_bar
+from tqdm import tqdm
 from log import l, logger_setup
 
 l = logging.getLogger()
@@ -105,8 +105,12 @@ def main():
             help='File name to pipe log output to. Writes the file to the output directory.')
         
         args = parser.parse_args()
-
-        logger_setup(verbose=args.verbose, quiet=args.quiet, log_file=args.logfile)
+        
+        if args.logfile:
+            log_file = Path(args.output + '\\' + args.logfile).resolve()
+        else:
+            log_file = None
+        logger_setup(verbose=args.verbose, quiet=args.quiet, log_file=log_file)
 
         l.info(f"IIS Log Parser is initiallizing..")
         file_list = []
@@ -118,25 +122,26 @@ def main():
 
         l.debug(f"Found {num_files} files")
 
-        with alive_bar(num_files) as bar:
-            for file in file_list:
-                f = Path(file)
-                if f.is_file():
-                    parent = str(f.parents[0]).split('\\')[-1]
-                    if args.reduce_files:
-                        outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
-                    else:
-                        outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
-                    #l.debug(f'Parsing: {f} to: {outfile}')         
-                    if outfile.exists():
-                        iis_log = IISLog(f, outfile, append=True)
-                        iis_log.parse()
-                    else:
-                        if outfile.parents[0].exists() == False:
-                            os.makedirs(outfile.parents[0])
-                        iis_log = IISLog(f, outfile)
-                        iis_log.parse()
-                bar()
+        i = 0
+        for i in tqdm(range(num_files)):
+            f = Path(file_list[i])
+            if f.is_file():
+                parent = str(f.parents[0]).split('\\')[-1]
+                if args.reduce_files:
+                    outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
+                else:
+                    outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
+                #l.debug(f'Parsing: {f} to: {outfile}')         
+                if outfile.exists():
+                    iis_log = IISLog(f, outfile, append=True)
+                    iis_log.parse()
+                else:
+                    if outfile.parents[0].exists() == False:
+                        os.makedirs(outfile.parents[0])
+                    iis_log = IISLog(f, outfile)
+                    iis_log.parse()
+            i += 1
+
                 
 
     except Exception as e:
