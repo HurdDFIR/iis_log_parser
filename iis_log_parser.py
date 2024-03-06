@@ -4,6 +4,11 @@ import argparse
 import time
 import traceback
 import sys
+import glob
+from pathlib import Path
+import os
+from alive_progress import alive_bar
+from log import l, logger_setup
 
 l = logging.getLogger()
 MAXINT = sys.maxsize
@@ -14,87 +19,14 @@ while True:
     except OverflowError:
         MAXINT = int(MAXINT/10)
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-class CustomFormatter(logging.Formatter):
-    grey = "\x1b[38;20m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    format = "%(asctime)s [%(levelname)s] [%(lineno)d]  \t%(message)s"
-
-    FORMATS = {
-        logging.DEBUG: grey + format + reset,
-        logging.INFO: grey + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset,
-        'ignore_color': format
-    }
-
-    def __init__(self, ignore_color=False):
-        self.ignore_color = ignore_color
-
-    def format(self, record):
-        if self.ignore_color:
-            log_fmt = self.FORMATS.get('ignore_color')
-        else:
-            log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
-    
-def get_arguments():
-    parser = argparse.ArgumentParser(description='iis_log_parser.py will go through an input IIS log and convert it to CSV format.')
-    parser.add_argument('-f', '--file', dest='input_file', 
-        action='store', type=str, default=None, required=True,
-        help='IIS log file to parse.')
-    parser.add_argument('-o', '--output', dest='output_file', 
-        action='store', type=str, default=None, required=True,
-        help='Output file path. Output will be written in CSV format.')
-    parser.add_argument('-v', '--verbose', required=False, action='store_true', 
-        help='Turn on verbose logging.')
-    args = parser.parse_args()
-
-    # Logging configuration
-    if(args.verbose):
-        l.setLevel(logging.DEBUG)
-        #log handlers
-        screen = logging.StreamHandler()
-        screen.setLevel(logging.DEBUG)
-        screen.setFormatter(CustomFormatter())
-        #debug_log = logging.FileHandler('debug.log')
-        #debug_log.setLevel(logging.DEBUG)
-        #debug_log.setFormatter(CustomFormatter(ignore_color=True))
-        l.addHandler(screen)
-        #l.addHandler(debug_log)
-    else:
-        l.setLevel(logging.INFO)
-        #log handlers
-        screen = logging.StreamHandler()
-        screen.setLevel(logging.INFO)
-        screen.setFormatter(CustomFormatter())
-        #debug_log = logging.FileHandler('debug.log')
-        #debug_log.setLevel(logging.INFO)
-        #debug_log.setFormatter(CustomFormatter(ignore_color=True))
-        l.addHandler(screen)
-        #l.addHandler(debug_log)
-
-    return args
-
 class IISLog:
-    def __init__(self, log_file, output_file):
+    def __init__(self, log_file, output_file, append=False):
         self.log_file = log_file
         self.output_file = output_file
+        if append:
+            self.mode = 'a'            
+        else:
+            self.mode = 'w'
 
     def read_headers(self):
         with open(self.log_file, 'r', encoding='utf-8') as input:
@@ -108,8 +40,7 @@ class IISLog:
 
 
     def parse(self):
-        # get the values, need to iterate
-        with open(self.log_file, 'r', encoding='utf-8') as input, open(self.output_file, 'w', encoding='utf-8', newline='') as output:
+        with open(self.log_file, 'r', encoding='utf-8') as input, open(self.output_file, self.mode, encoding='utf-8', newline='') as output:
             # Get the header keys and combine the date/time fields into one. 
             raw_keys = self.read_headers()
             first_index = str(raw_keys[0]) + ' ' + str(raw_keys[1])
@@ -119,7 +50,9 @@ class IISLog:
                 keys.append(key)
 
             csv_writer = csv.DictWriter(output, fieldnames=keys, dialect='unix')
-            csv_writer.writeheader()
+            # New file == writeheader()
+            if self.mode == 'w':            
+                csv_writer.writeheader()
 
             for line in input:
                 if not line.startswith('#'):
@@ -137,18 +70,79 @@ class IISLog:
                     csv_line_dict = dict(zip(keys, values))
                     csv_writer.writerow(csv_line_dict)
 
+
+class FileList:
+    def __init__(self, glob_pattern):
+        self.glob_pattern = glob_pattern
+        self.file_list = self._make_file_list()
+
+    def _make_file_list(self):
+        return glob.glob(self.glob_pattern, recursive=True, include_hidden=True)
+
 def main():
     start = time.time()
     try:
-        args = get_arguments()
-        iis_log = IISLog(args.input_file, args.output_file)
-        iis_log.parse()
+        __version__ = '2.0.0'
+        __author__ = 'Stephen Hurd | @HurdDFIR'
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            description='iis_log_parser will parse an IIS log and convert it to CSV format. This program supports the usage of glob patterns as well as multiple files/patterns at the command line.',
+            epilog=f'v{__version__} | Author: {__author__}')
 
+        parser.add_argument('-f', '--files', dest='glob_patterns', 
+            action='extend', nargs='+', type=str, default=None, required=True,
+            help='IIS log file to parse. This supports globbing patterns and a mulitple files/patterns (space separated).')
+        parser.add_argument('-o', '--output', dest='output', 
+            action='store', type=str, default=None, required=True,
+            help='Output directory. Output will be written in CSV format.')
+        parser.add_argument('--reduce_files', required=False, action='store_true', default=False,
+            help='Reduces the number of files to one large file per IIS log directory.')
+        parser.add_argument('-v', '--verbose', required=False, action='store_true', 
+            help='Turn on verbose logging.')
+        parser.add_argument('-q', '--quiet', required=False, action='store_true', 
+            help='Enable quiet mode for reduced logging.')
+        parser.add_argument('-l', '--logfile', required=False, type=str, dest='logfile', action='store', 
+            help='File name to pipe log output to. Writes the file to the output directory.')
+        
+        args = parser.parse_args()
+
+        logger_setup(verbose=args.verbose, quiet=args.quiet, log_file=args.logfile)
+
+        l.info(f"IIS Log Parser is initiallizing..")
+        file_list = []
+        for pattern in args.glob_patterns:
+            l.debug(f"Ingesting glob pattern: {pattern}")
+            file_list += FileList(pattern).file_list
+        
+        num_files = len(file_list)
+
+        l.debug(f"Found {num_files} files")
+
+        with alive_bar(num_files) as bar:
+            for file in file_list:
+                f = Path(file)
+                if f.is_file():
+                    parent = str(f.parents[0]).split('\\')[-1]
+                    if args.reduce_files:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
+                    else:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
+                    #l.debug(f'Parsing: {f} to: {outfile}')         
+                    if outfile.exists():
+                        iis_log = IISLog(f, outfile, append=True)
+                        iis_log.parse()
+                    else:
+                        if outfile.parents[0].exists() == False:
+                            os.makedirs(outfile.parents[0])
+                        iis_log = IISLog(f, outfile)
+                        iis_log.parse()
+                bar()
+                
 
     except Exception as e:
         l.error(f'ERROR: {e}\n{traceback.format_exc()}')
 
     end = time.time()
-    print("Execution time:\t" + str(end - start))
+    l.debug("Execution time:\t" + str(end - start))
 if __name__ == '__main__':
     main()
