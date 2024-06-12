@@ -28,7 +28,7 @@ class IISLog:
             self.mode = 'w'
 
     def read_headers(self):
-        with open(self.log_file, 'r', encoding='utf-8') as input:
+        with open(self.log_file, 'r', encoding='utf-8', errors='ignore') as input:
             for line in input:
                 if line.startswith('#Fields:'):
                     # gather headers
@@ -39,7 +39,7 @@ class IISLog:
 
 
     def parse(self):
-        with open(self.log_file, 'r', encoding='utf-8') as input, open(self.output_file, self.mode, encoding='utf-8', newline='') as output:
+        with open(self.log_file, 'r', encoding='utf-8', errors='ignore') as input, open(self.output_file, self.mode, encoding='utf-8', newline='', errors='ignore') as output:
             # Get the header keys and combine the date/time fields into one. 
             raw_keys = self.read_headers()
             first_index = str(raw_keys[0]) + ' ' + str(raw_keys[1])
@@ -121,30 +121,50 @@ def main():
 
         l.debug(f"Found {num_files} files")
 
-        i = 0
-        toolbar_width = 40
-        for i in range(num_files):
-            f = Path(file_list[i])
-            if f.is_file():
-                parent = str(f.parents[0]).split('\\')[-1]
-                if args.reduce_files:
-                    outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
-                else:
-                    outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
-                #l.debug(f'Parsing: {f} to: {outfile}')         
-                if outfile.exists():
-                    iis_log = IISLog(f, outfile, append=True)
-                    iis_log.parse()
-                else:
-                    if outfile.parents[0].exists() == False:
-                        os.makedirs(outfile.parents[0])
-                    iis_log = IISLog(f, outfile)
-                    iis_log.parse()
-            
-            i += 1
-            sys.stdout.write(f"[#]  Progress: {i}/{num_files}")
-            sys.stdout.flush()
-            sys.stdout.write("\b" * (toolbar_width+1))                
+        if args.quiet:
+            for i in range(num_files):
+                f = Path(file_list[i])
+                if f.is_file():
+                    parent = str(f.parents[0]).split('\\')[-1]
+                    if args.reduce_files:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
+                    else:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
+                    #l.debug(f'Parsing: {f} to: {outfile}')         
+                    if outfile.exists():
+                        iis_log = IISLog(f, outfile, append=True)
+                        iis_log.parse()
+                    else:
+                        if outfile.parents[0].exists() == False:
+                            os.makedirs(outfile.parents[0])
+                        iis_log = IISLog(f, outfile)
+                        iis_log.parse()  
+        
+        else :
+            i = 0
+            toolbar_width = 40
+            for i in range(num_files):
+                f = Path(file_list[i])
+                if f.is_file():
+                    parent = str(f.parents[0]).split('\\')[-1]
+                    if args.reduce_files:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + parent + '.csv')
+                    else:
+                        outfile = Path(args.output + '\\' + str(parent) + '\\' + f.stem + '.csv')
+                    #l.debug(f'Parsing: {f} to: {outfile}')         
+                    if outfile.exists():
+                        iis_log = IISLog(f, outfile, append=True)
+                        iis_log.parse()
+                    else:
+                        if outfile.parents[0].exists() == False:
+                            os.makedirs(outfile.parents[0])
+                        iis_log = IISLog(f, outfile)
+                        iis_log.parse()
+                
+                i += 1
+                sys.stdout.write(f"[#]  Progress: {i}/{num_files}")
+                sys.stdout.flush()
+                sys.stdout.write("\b" * (toolbar_width+1))                
 
     except Exception as e:
         l.error(f'ERROR: {e}\n{traceback.format_exc()}')
